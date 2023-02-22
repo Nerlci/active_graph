@@ -15,7 +15,7 @@ import time
 # Factory class:
 class ActiveFactory:
     def __init__(self, args, model, data, prev_index):
-        # 
+        #
         self.args = args
         self.model = model
         self.data = data
@@ -39,7 +39,7 @@ class ActiveFactory:
         elif self.args.method == 'age':
             self.learner = AgeLearner
         elif self.args.method == 'combined':
-            self.learner = CombinedLearner 
+            self.learner = CombinedLearner
         return self.learner(self.args, self.model, self.data, self.prev_index)
 
 # Base class
@@ -50,7 +50,7 @@ class ActiveLearner:
         self.n = data.num_nodes
         self.args = args
         self.prev_index = prev_index
-        
+
         if prev_index is None:
             self.prev_index_list = []
         else:
@@ -66,7 +66,7 @@ class ActiveLearner:
 class CombinedLearner(ActiveLearner):
     def __init__(self, args, model, data, prev_index):
         super(CombinedLearner, self).__init__(args, model, data, prev_index)
-    
+
     def pretrain_choose(self, num_points):
         # first choose half nodes from uncertain
         prev_index_len = len(self.prev_index_list)
@@ -91,7 +91,7 @@ def centralissimo(G):
     Nc = len(centralities)
     cenarray = np.zeros((Nc,L))
     for i in range(Nc):
-    	cenarray[i][list(centralities[i].keys())]=list(centralities[i].values())
+        cenarray[i][list(centralities[i].keys())]=list(centralities[i].values())
     normcen = (cenarray.astype(float)-np.min(cenarray,axis=1)[:,None])/(np.max(cenarray,axis=1)-np.min(cenarray,axis=1))[:,None]
     return normcen
 
@@ -118,7 +118,7 @@ class AgeLearner(ActiveLearner):
         super(AgeLearner, self).__init__(args, model, data, prev_index)
         self.device = data.x.get_device()
 
-        self.G = tgu.to_networkx(data.edge_index)
+        self.G = tgu.to_networkx(data)
         self.normcen = centralissimo(self.G).flatten()
         self.cenperc = np.asarray([perc(self.normcen,i) for i in range(len(self.normcen))])
         self.NCL = len(np.unique(data.y.cpu().numpy()))
@@ -126,7 +126,7 @@ class AgeLearner(ActiveLearner):
         if args.dataset == 'Citeseer':
             self.basef = 0.9
         # print('Age init time', time.time() - start_time)
-        
+
     def pretrain_choose(self, num_points):
         # start_time = time.time()
         self.model.eval()
@@ -153,7 +153,7 @@ class AgeLearner(ActiveLearner):
         entrperc = perc_full_np(scores.detach().cpu().numpy())
         # print('Age pretrain entrperc time', time.time() - start_time)
         # start_time = time.time()
-        kmeans = KMeans(n_clusters=self.NCL, random_state=0).fit(softmax_out)
+        kmeans = KMeans(n_clusters=self.NCL, random_state=0, n_init=10).fit(softmax_out)
         # print('Age pretrain kmeans time', time.time() - start_time)
         # start_time = time.time()
         ed=euclidean_distances(softmax_out,kmeans.cluster_centers_)
@@ -177,11 +177,11 @@ class AnrmabLearner(ActiveLearner):
         self.y = data.y.detach().cpu().numpy()
         self.NCL = len(np.unique(data.y.cpu().numpy()))
 
-        self.G = tgu.to_networkx(data.edge_index)
+        self.G = tgu.to_networkx(data)
         self.normcen = centralissimo(self.G).flatten()
         self.w = np.array([1., 1., 1.]) # ie, nc, id
         # print('AnrmabLearner init time', time.time() - start_time)
-        
+
     def pretrain_choose(self, num_points):
         # here we adopt a slightly different strategy which does not exclude sampled points in previous rounds to keep consistency with other methods
         self.model.eval()
@@ -200,7 +200,7 @@ class AnrmabLearner(ActiveLearner):
         epoch = len(self.prev_index_list)
 
         softmax_out = F.softmax(prev_out, dim=1).cpu().detach().numpy()
-        kmeans = KMeans(n_clusters=self.NCL, random_state=0).fit(softmax_out)
+        kmeans = KMeans(n_clusters=self.NCL, random_state=0, n_init=10).fit(softmax_out)
         ed=euclidean_distances(softmax_out,kmeans.cluster_centers_)
         ed_score = np.min(ed,axis=1)	#the larger ed_score is, the far that node is away from cluster centers, the less representativeness the node is
 
@@ -214,7 +214,7 @@ class AnrmabLearner(ActiveLearner):
         w_len = self.w.shape[0]
         p_min = np.sqrt(np.log(w_len) / w_len / num_points)
         p_mat = (1 - w_len*p_min) * self.w / self.w.sum() + p_min # 3
-        
+
         phi = p_mat[:, np.newaxis] * q_mat # 3 x n
         phi = phi.sum(axis=0) # n
 
@@ -280,7 +280,7 @@ class UncertaintyLearner(ActiveLearner):
                 break
 
         indices = torch.LongTensor( np.concatenate((self.prev_index_list, add_index_list)) )
-        ret_tensor = torch.zeros((self.n), dtype=torch.uint8)
+        ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         ret_tensor[indices] = 1
         return ret_tensor'''
         return combine_new_old(full_new_index_list, self.prev_index_list, num_points, self.n, in_order=True)
@@ -294,7 +294,7 @@ class CoresetLearner(ActiveLearner):
         # random selection if the model is untrained
         if self.prev_index is None:
             indices = torch.multinomial(torch.range(start=1, end=self.n-1), num_samples=num_points, replacement=False)
-            ret_tensor = torch.zeros((self.n), dtype=torch.uint8)
+            ret_tensor = torch.zeros((self.n), dtype=torch.bool)
             ret_tensor[indices] = 1
             return ret_tensor
 
@@ -311,7 +311,7 @@ class CoresetLearner(ActiveLearner):
         prev_index_len = len(self.prev_index_list)
         diff_list = np.asarray(list(set(new_index_list).difference(set(self.prev_index_list))))
         indices = torch.LongTensor( np.concatenate((self.prev_index_list, diff_list[:-prev_index_len + num_points])) )
-        ret_tensor = torch.zeros((self.n), dtype=torch.uint8)
+        ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         ret_tensor[indices] = 1
         '''
         if self.args.cluster_method == 'kmeans':
@@ -349,7 +349,7 @@ class KmeansLearner(ActiveLearner):
         kmeans = KMeans(n_clusters=num_points).fit(features)
         center_dist = pairwise_distances(kmeans.cluster_centers_, features) # k x n
         indices = torch.LongTensor(np.argmin(center_dist, axis=1))
-        ret_tensor = torch.zeros((self.n), dtype=torch.uint8)
+        ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         ret_tensor[indices] = 1
         return ret_tensor
         '''
@@ -359,7 +359,7 @@ class RandomLearner(ActiveLearner):
         super(RandomLearner, self).__init__(args, model, data, prev_index)
     def pretrain_choose(self, num_points):
         indices = torch.multinomial(torch.range(start=1, end=self.n-1), num_samples=num_points, replacement=False)
-        ret_tensor = torch.zeros((self.n), dtype=torch.uint8)
+        ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         ret_tensor[indices] = 1
         return ret_tensor
 
@@ -370,7 +370,7 @@ class DegreeLearner(ActiveLearner):
         self.adj_full = convert_edge2adj(data.edge_index, data.num_nodes)
         print('Time cost: {}'.format(time.time() - start))
     def pretrain_choose(self, num_points):
-        ret_tensor = torch.zeros((self.n), dtype=torch.uint8)
+        ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         degree_full = self.adj_full.sum(dim=1)
         vals, indices = torch.topk(degree_full, k=num_points)
         ret_tensor[indices] = 1
@@ -386,12 +386,12 @@ class NonOverlapDegreeLearner(ActiveLearner):
         print('Time cost: {}'.format(time.time() - start))
     def pretrain_choose(self, num_points):
         # select by degree
-        ret_tensor = torch.zeros((self.n), dtype=torch.uint8)
+        ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         degree_full = self.adj_full.sum(dim=1)
         vals, indices = torch.sort(degree_full, descending=True)
-        
+
         index_list = []
-        
+
         num = 0
         for i in indices:
             edge_flag = False
@@ -404,6 +404,6 @@ class NonOverlapDegreeLearner(ActiveLearner):
                 num += 1
             if num == num_points:
                 break
-        
+
         ret_tensor[torch.LongTensor(index_list)] = 1
         return ret_tensor

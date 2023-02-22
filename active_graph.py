@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 import time
 
-from torch_geometric.datasets import Planetoid, PPI, Amazon, CoraFull
+from torch_geometric.datasets import Planetoid, PPI, Amazon, CoraFull, WebKB, WikipediaNetwork, Actor
 
 import methods
 from methods import ActiveFactory
@@ -89,7 +89,7 @@ parser.add_argument('--hid_dim', type=int, default=16,
 
 # Active method
 parser.add_argument('--model', type=str, default='GCN',
-                    help='back-end classifier, choose from [GCN, MatrixGCN, SGC]')
+                    help='back-end classifier, choose from [GCN, MatrixGCN, SGC, H2GCN]')
 parser.add_argument('--method', type=str, default='random',
                     help='choice between [random, kmeans, ...]')
 parser.add_argument('--rand_rounds', type=int, default=1,
@@ -97,7 +97,7 @@ parser.add_argument('--rand_rounds', type=int, default=1,
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='prob of an element to be zeroed.')
 
-### Options within method 
+### Options within method
 # KMeans
 parser.add_argument('--kmeans_num_layer', type=int, default=0,
                     help='number of propergation for KMeans to generate new features')
@@ -128,6 +128,9 @@ parser.add_argument('--uniform_random', action='store_true',
 parser.add_argument('--anrmab_argmax', action='store_true',
                     help='whether to use the (deterministic) argmax points instead of sampling.')
 
+parser.add_argument('--rewire', action='store_true',
+                    help='whether to use rewire or not')
+
 # TODO: replace with the pseudo-command line
 args = parser.parse_args()
 
@@ -152,6 +155,15 @@ elif args.dataset in ['Computers', 'Photo']:
 elif args.dataset in ['CoraFull']:
     dataset = CoraFull(root='./data/{}'.format(args.dataset))
     data = dataset[0].to(device)
+elif args.dataset in ['Cornell', 'Wisconsin', 'Texas']:
+    dataset = WebKB(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset))
+    data = dataset[0].to(device)
+elif args.dataset in ['Chameleon', 'Squirrel']:
+    dataset = WikipediaNetwork(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset.lower()))
+    data = dataset[0].to(device)
+elif args.dataset in ['Actor']:
+    dataset = Actor(root='./data/{}'.format(args.dataset))
+    data = dataset[0].to(device)
 else:
     raise NotImplementedError
 Net = get_model(args.model)
@@ -161,6 +173,30 @@ args.num_features = dataset.num_features
 args.num_classes = dataset.num_classes
 
 print(args)
+
+if args.rewire:
+    pass
+    # model_learner = GCN(nfeat=features.shape[1],
+    #                     nhid=16,
+    #                     nclass=labels.max().item() + 1,
+    #                     dropout=0.5)
+    # optimizer = optim.Adam(model_learner.parameters(),
+    #                        lr=0.01, weight_decay=5e-4)
+    #
+    # num_node = labels.shape[0]
+    # train_size = idx_train.size(0)
+    # mask = range(num_node)
+    # loss, val_acc = train_mask(features, mask)
+    #
+    # print("Optimization Finished!")
+    #
+    # weight = model_learner.gc1.weight.data
+    # sim_mx = calculate_similarity_mx(torch.mm(features, weight), train_size)
+    #
+    # adj1 = rewire(sim_mx, adj1, 1, 0.7, 0.3)
+    # adj = sp.coo_matrix(adj1)
+    # adj = normalize_adj(adj + sp.eye(adj.shape[0]))
+    # adj = torch.FloatTensor(np.array(adj.todense()))
 
 # 2 types of AL
 # - 1. fresh start of optimizer and model
@@ -172,7 +208,7 @@ def active_learn(k, data, old_model, old_optimizer, prev_index, args):
         loss_func = torch.nn.BCEWithLogitsLoss()
     else:
         loss_func = F.nll_loss
-    test_mask = torch.ones(data.y.shape[0], dtype=torch.uint8)
+    test_mask = torch.ones(data.y.shape[0], dtype=torch.bool)
     data_y = data.y > 0.99 # cast to uint8 for downstream-fast computation
     # test_mask = torch.ones_like(data.test_mask)
     # for multi-class
@@ -198,7 +234,7 @@ def active_learn(k, data, old_model, old_optimizer, prev_index, args):
                 features = features.cpu().numpy()
                 learner = CoreSetMIPSampling(old_model, input_shape=None, num_labels=args.num_classes,gpu=1)
 
-            train_mask = torch.zeros(data.y.shape[0], dtype=torch.uint8)
+            train_mask = torch.zeros(data.y.shape[0], dtype=torch.bool)
             prev_index_list = np.where(prev_index.cpu().numpy())[0]
             if args.method == 'mip':
                 train_mask_list = torch.LongTensor(learner.query(data, prev_index_list, k-len(prev_index_list), representation=features))
@@ -214,7 +250,7 @@ def active_learn(k, data, old_model, old_optimizer, prev_index, args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     model.train()
-    
+
     if args.verbose:
         print('selected labels:', data.y[train_mask])
     # fresh new training

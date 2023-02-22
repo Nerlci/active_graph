@@ -101,7 +101,7 @@ def combine_new_old(full_new_index_list, prev_index_list, num_points, n, in_orde
         new_index_list = diff_list[:-prev_index_len + num_points]
         # return new_index_list
     indices = torch.LongTensor( np.concatenate((prev_index_list, new_index_list)) )
-    ret_tensor = torch.zeros((n), dtype=torch.uint8)
+    ret_tensor = torch.zeros((n), dtype=torch.bool)
     ret_tensor[indices] = 1
     return ret_tensor
 

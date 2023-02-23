@@ -233,3 +233,20 @@ class H2GCN(torch.nn.Module):
         fin_x = torch.mm(r_final, self.w_classify)
 
         return (x, x, fin_x), torch.softmax(torch.mm(r_final, self.w_classify), dim=1)
+
+
+class MLP(torch.nn.Module):
+    def __init__(self, nfeat, nhid, nclass, dropout):
+        super(MLP, self).__init__()
+        self.lr1 = torch.nn.Linear(nfeat, nhid)
+        self.lr2 = torch.nn.Linear(nhid, nclass)
+
+        self.dropout = dropout
+
+    def forward(self, x):
+        x = torch.from_numpy(x)
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = self.lr1(x)
+        # x = F.dropout(x, self.dropout, training=self.training)
+        # x = self.lr2(x)
+        return x

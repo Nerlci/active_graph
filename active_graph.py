@@ -16,9 +16,10 @@ from torch_geometric.datasets import Planetoid, PPI, Amazon, CoraFull, WebKB, Wi
 
 import methods
 from methods import ActiveFactory
-from models import get_model, MLP
+from models import get_model
 
 from query_methods import CoreSetSampling, CoreSetMIPSampling
+from rewire import train_and_rewire
 from utils import normalize, convert_edge2adj
 from metrics import final_eval, METRIC_NAMES
 
@@ -132,8 +133,21 @@ parser.add_argument('--uniform_random', action='store_true',
 parser.add_argument('--anrmab_argmax', action='store_true',
                     help='whether to use the (deterministic) argmax points instead of sampling.')
 
+#rewire
 parser.add_argument('--rewire', action='store_true',
                     help='whether to use rewire or not')
+parser.add_argument('--added_edges', type=int, default=1,
+                    help='count of edges to add in rewiring')
+parser.add_argument('--growing_threshold', type=float, default=0.2,
+                    help='growing threshold for rewiring')
+parser.add_argument('--pruning_threshold', type=float, default=0.1,
+                    help='pruning threshold for rewiring')
+parser.add_argument('--rewire_batch_size', type=int, default=50,
+                    help='rewire batch size')
+parser.add_argument('--rewire_epoch', type=int, default=200,
+                    help='rewire epoch count')
+parser.add_argument('--mask_threshold', type=float, default=0.2,
+                    help='mask threshold for rewiring')
 
 # TODO: replace with the pseudo-command line
 args = parser.parse_args()
@@ -179,80 +193,8 @@ args.num_classes = dataset.num_classes
 print(args)
 
 #rewire
-
-batch_size = 80
-
-def train_mask(mx, mask):
-    loss_history = []
-    val_acc_history = []
-    t = time.time()
-    model_learner.train()
-
-    t_total = time.time()
-    for epoch in range(50):
-        global idx_train
-        # for i in range(args.max_iter):
-        if isinstance(idx_train, list):
-            idx_train = torch.tensor(idx_train)
-        train_size = idx_train.size(0)
-        v1 = random.sample(mask, batch_size)
-        v2 = random.sample(mask, batch_size)
-        # todo: 2-order neighbour
-        # compute similarity matrix
-        optimizer.zero_grad()
-        output = model_learner(mx, adj.to_dense())
-        output_batch = [output[i] for i in v1]
-        features_batch = [mx[i] for i in v1]
-        S = calculate_similarity_mx(output_batch, batch_size)
-        S_X = calculate_similarity_mx(features_batch, batch_size)
-        loss_train = F.l1_loss(S, S_X)
-        acc_train = accuracy_MSE(S, S_X)
-        loss_train.backward()
-        optimizer.step()
-        loss_val = F.l1_loss(S, S_X)
-        acc_val = accuracy_MSE(S, S_X)
-        loss_history.append(loss_val.item())
-        val_acc_history.append(acc_val.item())
-        print('Epoch: {:04d}'.format(epoch + 1),
-              'loss_train: {:.4f}'.format(loss_train.item()),
-              'acc_train: {:.4f}'.format(acc_train.item()),
-              'loss_val: {:.4f}'.format(loss_val.item()),
-              'acc_val: {:.4f}'.format(acc_val.item()),
-              'time: {:.4f}s'.format(time.time() - t))
-    print("Optimization Finished!")
-    print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
-    return loss_history, val_acc_history
-
-
-def calculate_similarity_mx(mx, node_cnt):
-    S = torch.from_numpy(np.zeros([node_cnt, node_cnt]))
-    for j in range(node_cnt):
-        for k in range(node_cnt):
-            S[j][k] = F.cosine_similarity(mx[j], mx[k], dim=0)
-    return S
-
-
 if args.rewire:
-    model_learner = MLP(nfeat=args.num_features,
-                        nhid=args.num_features,
-                        nclass=args.num_features,
-                        dropout=0.5)
-    optimizer = optim.Adam(model_learner.parameters(),
-                           lr=0.01, weight_decay=5e-4)
-
-    mask = range(data.num_nodes)
-    loss, val_acc = train_mask(data.x, mask)
-
-    print("Optimization Finished!")
-
-    weight1 = model_learner.gc1.weight.data
-    weight2 = model_learner.gc2.weight.data
-    sim_mx = torch.mm(calculate_similarity_mx(torch.mm(data.x, weight1), data.num_nodes), calculate_similarity_mx(torch.mm(data.x, weight2), data.num_nodes))
-
-    # adj1 = rewire(sim_mx, adj1, 1, 0.7, 0.3)
-    # adj = sp.coo_matrix(adj1)
-    # adj = normalize_adj(adj + sp.eye(adj.shape[0]))
-    # adj = torch.FloatTensor(np.array(adj.todense()))
+    data = train_and_rewire(args, data, range(data.num_nodes))
 
 
 # 2 types of AL
@@ -357,6 +299,20 @@ for num_round in range(args.rand_rounds):
     single_x_label = []
     # for some methods, the current selection is dependent on previous results
     for num, k in enumerate(args.label_list):
+        if args.rewire and train_mask is not None:
+            rewire_mask = []
+            neighbour = [1] * data.num_nodes
+            ctr = [int(i) for i in train_mask]
+            for i in range(data.edge_index[0].shape[0]):
+                u, v = (data.edge_index[0][i], data.edge_index[1][i])
+                neighbour[u] += 1
+                neighbour[v] += 1
+                ctr[u] += train_mask[v]
+                ctr[v] += train_mask[u]
+            for i in range(len(ctr)):
+                if (ctr[i] / neighbour[i]) >= args.mask_threshold: rewire_mask.append(i)
+            if len(rewire_mask) >= args.rewire_batch_size:
+                data = train_and_rewire(args, data, rewire_mask)
         # lr should be 0.001??
         # replace old model, optimizer with new model
         # all_metrics is a tuple

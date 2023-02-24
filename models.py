@@ -136,7 +136,6 @@ class H2GCN(torch.nn.Module):
     def __init__(self, args, data):
         super(H2GCN, self).__init__()
         self.dropout = args.dropout
-        self.dropout = args.dropout
         self.k = 2
         self.act = F.relu
         self.use_relu = True
@@ -154,6 +153,7 @@ class H2GCN(torch.nn.Module):
         self.a2 = None
         self.reset_parameter()
         self.args = args
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def reset_parameter(self):
         torch.nn.init.xavier_uniform_(self.w_embed)
@@ -197,7 +197,7 @@ class H2GCN(torch.nn.Module):
         return cls._spspmm(cls._spspmm(d_tiled, adj), d_tiled)
 
     def _prepare_prop(self, adj):
-        adj = torch.tensor(adj)
+        adj = torch.as_tensor(adj)
         adj_size = adj.size(0)
         self.initialized = True
         sp_eye = torch.sparse_coo_tensor(
@@ -205,7 +205,7 @@ class H2GCN(torch.nn.Module):
             values=[1.0] * adj_size,
             size=(adj_size, adj_size),
             dtype=torch.float
-        )
+        ).to(self.device)
         # initialize A1, A2
         a1 = self._indicator(adj - sp_eye)
         a2 = self._indicator(self._spspmm(adj, adj) - adj - sp_eye)
@@ -221,7 +221,7 @@ class H2GCN(torch.nn.Module):
             self._prepare_prop(adj)
         # H2GCN propagation
 
-        rs = [self.act(torch.mm(torch.tensor(x), self.w_embed))]
+        rs = [self.act(torch.mm(torch.as_tensor(x), self.w_embed))]
         for i in range(self.k):
             r_last = rs[-1]
             r1 = torch.spmm(self.a1, r_last)
@@ -233,20 +233,3 @@ class H2GCN(torch.nn.Module):
         fin_x = torch.mm(r_final, self.w_classify)
 
         return (x, x, fin_x), torch.softmax(torch.mm(r_final, self.w_classify), dim=1)
-
-
-class MLP(torch.nn.Module):
-    def __init__(self, nfeat, nhid, nclass, dropout):
-        super(MLP, self).__init__()
-        self.lr1 = torch.nn.Linear(nfeat, nhid)
-        self.lr2 = torch.nn.Linear(nhid, nclass)
-
-        self.dropout = dropout
-
-    def forward(self, x):
-        x = torch.from_numpy(x)
-        x = F.dropout(x, self.dropout, training=self.training)
-        x = self.lr1(x)
-        # x = F.dropout(x, self.dropout, training=self.training)
-        # x = self.lr2(x)
-        return x

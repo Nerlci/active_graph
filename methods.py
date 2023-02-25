@@ -327,7 +327,7 @@ class KmeansLearner(ActiveLearner):
         start = time.time()
         self.adj_full = convert_edge2adj(data.edge_index, data.num_nodes)
         print('Time cost: {}'.format(time.time() - start))
-        self.device = data.x.get_device()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.norm_adj = normalize(self.adj_full + torch.eye(self.n) * self.args.self_loop_coeff).to(self.device)
 
     def pretrain_choose(self, num_points):

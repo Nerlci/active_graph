@@ -8,7 +8,6 @@ import scipy
 import torch
 import math
 
-from sklearn.metrics import mean_squared_error
 from torch import optim
 from torch.nn.parameter import Parameter
 from tqdm import tqdm
@@ -63,8 +62,8 @@ def train_mask(args, model, optimizer, data, mask):
         output = model(mx)
         output_batch = output[v1]
         features_batch = mx[v1]
-        S = calculate_similarity_mx(output_batch, args.rewire_batch_size)
-        S_X = calculate_similarity_mx(features_batch, args.rewire_batch_size)
+        S = calculate_similarity_mx(output_batch)
+        S_X = calculate_similarity_mx(features_batch)
         loss_train = F.l1_loss(S, S_X)
         acc_train = accuracy_MSE(S, S_X)
         loss_train.backward()
@@ -88,26 +87,26 @@ def train_mask(args, model, optimizer, data, mask):
     return loss_history, val_acc_history
 
 
-def calculate_similarity_mx(mx, node_cnt):
-    return torch.cosine_similarity(mx.unsqueeze(1), mx.unsqueeze(0), dim=-1)
+def calculate_similarity_mx(mx):
+    mx = mx / torch.norm(mx, dim=-1, keepdim=True)
+    return torch.mm(mx, mx.T)
 
 def rewire(args, data, sim_mx):
     node_num = sim_mx.size(0)
     adj = tgu.to_scipy_sparse_matrix(data.edge_index)
     adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
-    adj = torch.from_numpy(np.array(adj.todense()))
+    adj = torch.from_numpy(np.array(adj.todense())).to(device)
 
-    for i in range(node_num):
-        sorted_sim, sorted_idx = torch.sort(sim_mx[i], descending=True)  # descending为True，降序
-        idx = sorted_idx[:args.added_edges]
-        for j in idx:
-            if sim_mx[i][j] > args.growing_threshold:
-                adj[i][j] = 1
+    _, to_grow = torch.topk(sim_mx * torch.gt(sim_mx, args.growing_threshold) * (1 - adj), k=args.added_edges)
+    to_grow = (torch.arange(node_num).repeat_interleave(args.added_edges).to(device), to_grow.view(-1))
+    adj[to_grow] = 1
 
-    for i in range(node_num):
-        for j in range(node_num):
-            if sim_mx[i][j] < args.pruning_threshold:
-                adj[i][j] = 0
+    # TODO: remove rows with all zeros
+
+    to_prune = torch.nonzero(torch.lt(sim_mx, args.pruning_threshold)).T
+    to_prune = (to_prune[0], to_prune[1])
+    adj[to_prune] = 0
+
     adj = adj.to_dense()
     return adj
 
@@ -124,11 +123,11 @@ def train_and_rewire(args, data, mask):
 
     weight1 = model.lr1.weight.data
     weight2 = model.lr2.weight.data
-    sim_mx = (calculate_similarity_mx(torch.mm(data.x, weight1), data.num_nodes) +
-              calculate_similarity_mx(torch.mm(data.x, weight2), data.num_nodes)) / 2
+    sim_mx = (calculate_similarity_mx(torch.mm(data.x, weight1)) +
+              calculate_similarity_mx(torch.mm(data.x, weight2))) / 2
 
     adj = tgu.to_torch_coo_tensor(data.edge_index)
-    adj = normalize_adj(sp.coo_matrix(rewire(args, data, sim_mx)) + sp.eye(adj.shape[0]))
+    adj = normalize_adj(sp.coo_matrix(rewire(args, data, sim_mx).cpu()) + sp.eye(adj.shape[0]))
     data.edge_index = tgu.from_scipy_sparse_matrix(adj)[0].to(device)
 
     return data

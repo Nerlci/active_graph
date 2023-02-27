@@ -1,4 +1,4 @@
-from random import random
+import random
 
 import numpy as np
 import argparse
@@ -156,6 +156,7 @@ args = parser.parse_args()
 if args.uniform_random:
     torch.manual_seed(args.seed)  # for GPU and CPU after torch 1.0
     np.random.seed(args.seed)
+    random.seed(args.seed)
 
 # device specification
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -186,7 +187,6 @@ else:
     raise NotImplementedError
 Net = get_model(args.model)
 
-
 args.num_features = dataset.num_features 
 args.num_classes = dataset.num_classes
 
@@ -196,6 +196,7 @@ print(args)
 if args.rewire:
     data = train_and_rewire(args, data, range(data.num_nodes))
 
+org_data = data.clone()
 
 # 2 types of AL
 # - 1. fresh start of optimizer and model
@@ -287,11 +288,13 @@ start_time = time.time()
 metric_names = METRIC_NAMES
 # different random seeds
 for num_round in range(args.rand_rounds):
+    data = org_data.clone()
     train_mask = None
     # here should be initialized with different seeds
     if not args.uniform_random:
         torch.manual_seed(num_round+args.seed)  # for GPU and CPU after torch 1.0
         np.random.seed(num_round+args.seed)
+        random.seed(num_round + args.seed)
     model = Net(args, data)
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -345,16 +348,21 @@ for num, k in enumerate(args.label_list):
     print('#label: {0:d}, {1:s}'.format(k, ' '.join(metric_string_list)))
 
 # dump to file about the specific results, for ease of std computation
-folder = '{}/{}/{}/'.format(args.model, args.dataset, args.method)
-if not os.path.exists(folder):
-    os.makedirs(folder)
-prefix='knl_{:1d}slc_{:.1f}us_{:s}'.format(args.kmeans_num_layer, args.self_loop_coeff, args.uncertain_score)
-for i in range(100):
-    # find the next available filename
-    filename = folder + prefix + '.{:02d}.json'.format(i)
-    if not os.path.exists(filename):
-        # parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist()}
-        parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist(), 'x_label': x_label, 'y_label': y_label, 'time': time.time()-start_time, 'metric_names': metric_names}
-        with open(filename, 'w') as f:
-            f.write(json.dumps(parsed, indent=2))
-        break
+# folder = '{}/{}/{}/'.format(args.model, args.dataset, args.method)
+# if not os.path.exists(folder):
+#     os.makedirs(folder)
+# prefix='knl_{:1d}slc_{:.1f}us_{:s}'.format(args.kmeans_num_layer, args.self_loop_coeff, args.uncertain_score)
+# for i in range(100):
+#     # find the next available filename
+#     filename = folder + prefix + '.{:02d}.json'.format(i)
+#     if not os.path.exists(filename):
+#         # parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist()}
+#         parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist(), 'x_label': x_label, 'y_label': y_label, 'time': time.time()-start_time, 'metric_names': metric_names}
+#         with open(filename, 'w') as f:
+#             f.write(json.dumps(parsed, indent=2))
+#         break
+
+filename = 'optim.json'
+parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist(), 'x_label': x_label, 'y_label': y_label, 'time': time.time()-start_time, 'metric_names': metric_names}
+with open(filename, 'w') as f:
+    f.write(json.dumps(parsed, indent=2))

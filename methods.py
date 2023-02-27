@@ -230,7 +230,7 @@ class AnrmabLearner(ActiveLearner):
         diff_list = np.asarray(list(set(mask_list).difference(set(self.prev_index_list))))
 
         pred = torch.argmax(out, dim=1).detach().cpu().numpy()
-        reward = 1. / num_points / (self.n - num_points) * np.sum((pred[mask_list] == self.y[mask_list]).astype(np.float) / phi[mask_list]) # scalar
+        reward = 1. / num_points / (self.n - num_points) * np.sum((pred[mask_list] == self.y[mask_list]).astype(np.float64) / phi[mask_list]) # scalar
         reward_hat = reward * np.sum(q_mat[:, diff_list] / phi[np.newaxis, diff_list], axis=1)
         # update self.w
         # get current node label epoch

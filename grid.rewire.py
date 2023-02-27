@@ -1,7 +1,6 @@
 import subprocess, os
 import tqdm
 my_env = os.environ.copy()
-my_env['CUDA_VISIBLE_DEVICES'] = '3'
 # my_env['CUDA_VISIBLE_DEVICES'] = '2'
 
 #
@@ -16,14 +15,14 @@ def run(args, my_env):
 
 
 models = ['MatrixGCN', 'SGC', 'GCN', 'H2GCN']
-datasets = ['Cora', 'Citeseer', 'PubMed', 'Actor', 'Cornell', 'Wisconsin', 'Texas', 'Chameleon', 'Squirrel']
+datasets = ['Actor', 'Cornell', 'Wisconsin', 'Texas', 'Chameleon', 'Squirrel', 'Cora', 'Citeseer', 'PubMed']
 label = {'Cora': 140, 'Citeseer': 120, 'PubMed': 60, 'Actor': 120,
          'Cornell': 80, 'Wisconsin': 80, 'Texas': 80, 'Chameleon': 120, 'Squirrel': 120}
 
 for model in models:
     for dataset in datasets:
         model_args = ['--model', model]
-        label_list = [str(i) for i in range(20, label[dataset]+1, 20)]
+        label_list = ['10'] + [str(i) for i in range(20, label[dataset]+1, 20)]
         dataset_args = ['--dataset', dataset, '--label_list'] + label_list
         print(dataset_args)
         # for dropout in ['0.5', '0.']:

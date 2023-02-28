@@ -136,7 +136,7 @@ parser.add_argument('--anrmab_argmax', action='store_true',
 #rewire
 parser.add_argument('--rewire', action='store_true',
                     help='whether to use rewire or not')
-parser.add_argument('--added_edges', type=int, default=1,
+parser.add_argument('--added_edges', type=float, default=0.01,
                     help='count of edges to add in rewiring')
 parser.add_argument('--growing_threshold', type=float, default=0.2,
                     help='growing threshold for rewiring')
@@ -194,7 +194,7 @@ print(args)
 
 #rewire
 if args.rewire:
-    data = train_and_rewire(args, data, range(data.num_nodes))
+    data = train_and_rewire(args, data, torch.arange(data.num_nodes))
 
 org_data = data.clone()
 
@@ -226,7 +226,7 @@ def active_learn(k, data, old_model, old_optimizer, prev_index, args):
             elif args.method == 'xcoresetmip':
                 learner = CoreSetMIPSampling(old_model, input_shape=None, num_labels=args.num_classes,gpu=1)
             elif args.method == 'mip':
-                adj_full = convert_edge2adj(data.edge_index, data.num_nodes)
+                adj_full = convert_edge2adj(data.edge_index)
                 norm_adj = normalize(adj_full + torch.eye(data.num_nodes) * args.self_loop_coeff).to(device)
                 features = data.x
                 for k in range(args.kmeans_num_layer):
@@ -302,20 +302,15 @@ for num_round in range(args.rand_rounds):
     single_x_label = []
     # for some methods, the current selection is dependent on previous results
     for num, k in enumerate(args.label_list):
+        # rewire
         if args.rewire and train_mask is not None:
-            rewire_mask = []
-            neighbour = [1] * data.num_nodes
-            ctr = [int(i) for i in train_mask]
-            for i in range(data.edge_index[0].shape[0]):
-                u, v = (data.edge_index[0][i], data.edge_index[1][i])
-                neighbour[u] += 1
-                neighbour[v] += 1
-                ctr[u] += train_mask[v]
-                ctr[v] += train_mask[u]
-            for i in range(len(ctr)):
-                if (ctr[i] / neighbour[i]) >= args.mask_threshold: rewire_mask.append(i)
-            if len(rewire_mask) >= args.rewire_batch_size:
+            adj = convert_edge2adj(data.edge_index)
+            neighbour = torch.matmul(adj, torch.ones(adj.shape[0]).to(device))
+            ctr = torch.matmul(adj, train_mask.to(device).float())
+            rewire_mask = torch.squeeze(torch.nonzero((ctr / neighbour) >= args.mask_threshold))
+            if rewire_mask.shape[0] >= args.rewire_batch_size:
                 data = train_and_rewire(args, data, rewire_mask)
+
         # lr should be 0.001??
         # replace old model, optimizer with new model
         # all_metrics is a tuple

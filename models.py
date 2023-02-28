@@ -21,7 +21,7 @@ class MatrixGCN(torch.nn.Module):
 
         start = time.time()
 
-        self.mat = Parameter(normalize(convert_edge2adj(data.edge_index, data.num_nodes) + torch.eye(data.num_nodes)), requires_grad=False)
+        self.mat = Parameter(normalize(convert_edge2adj(data.edge_index) + torch.eye(data.num_nodes)), requires_grad=False)
         self.linear1 = Parameter(torch.Tensor(args.num_features, args.hid_dim))
         self.linear2 = Parameter(torch.Tensor(args.hid_dim, args.num_classes))
 
@@ -54,7 +54,7 @@ class MatrixGCN_layer3(torch.nn.Module):
 
         start = time.time()
 
-        self.mat = Parameter(normalize(convert_edge2adj(data.edge_index, data.num_nodes) + torch.eye(data.num_nodes)), requires_grad=False)
+        self.mat = Parameter(normalize(convert_edge2adj(data.edge_index) + torch.eye(data.num_nodes)), requires_grad=False)
         self.linear1 = Parameter(torch.Tensor(args.num_features, args.hid_dim))
         self.linear2 = Parameter(torch.Tensor(args.hid_dim, args.hid_dim))
         self.linear3 = Parameter(torch.Tensor(args.hid_dim, args.num_classes))
@@ -110,7 +110,7 @@ class GCN(torch.nn.Module):
 class SGC(torch.nn.Module):
     def __init__(self, args, data):
         super(SGC, self).__init__()
-        self.mat = Parameter(normalize(convert_edge2adj(data.edge_index, data.num_nodes) + torch.eye(data.num_nodes)), requires_grad=False)
+        self.mat = Parameter(normalize(convert_edge2adj(data.edge_index) + torch.eye(data.num_nodes)), requires_grad=False)
         self.linear1 = Parameter(torch.Tensor(args.num_features, args.hid_dim))
         self.linear2 = Parameter(torch.Tensor(args.hid_dim, args.num_classes))
 

@@ -1,18 +1,20 @@
 import torch
 import numpy as np
 import time
+import torch_geometric.utils as tgu
 from sklearn.metrics import pairwise_distances
 from sklearn.cluster import KMeans
 
 # Transformation utils
 # construct adj matrix from edge_index
 # TODO: should consider GPU/CPU convertion
-def convert_edge2adj(edge_index, num_nodes):
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def convert_edge2adj(edge_index):
     # float type
-    mat = torch.zeros((num_nodes, num_nodes))
-    for i in range(edge_index.shape[1]):
-        x, y = edge_index[:, i]
-        mat[x, y] = mat[y, x] = 1
+    mat = tgu.to_scipy_sparse_matrix(edge_index)
+    mat = mat + mat.T.multiply(mat.T > mat) - mat.multiply(mat.T > mat)
+    mat = torch.from_numpy(np.array(mat.todense())).to(device)
     return mat
 
 def normalize(adj):

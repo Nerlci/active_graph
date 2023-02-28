@@ -13,6 +13,8 @@ from torch.nn.parameter import Parameter
 from tqdm import tqdm
 import torch_geometric.utils as tgu
 
+from utils import convert_edge2adj
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def normalize_adj(mx):
@@ -54,7 +56,7 @@ def train_mask(args, model, optimizer, data, mask):
     print("Training rewire similarity matrix")
     t_total = time.time()
     for epoch in tqdm(range(args.rewire_epoch)):
-        v1 = random.sample(mask, args.rewire_batch_size)
+        v1 = random.sample(mask.tolist(), args.rewire_batch_size)
         # v2 = random.sample(mask, args.rewire_batch_size)
         # todo: 2-order neighbour
         # compute similarity matrix
@@ -93,12 +95,10 @@ def calculate_similarity_mx(mx):
 
 def rewire(args, data, sim_mx):
     node_num = sim_mx.size(0)
-    adj = tgu.to_scipy_sparse_matrix(data.edge_index)
-    adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
-    adj = torch.from_numpy(np.array(adj.todense())).to(device)
+    adj = convert_edge2adj(data.edge_index).to(device)
 
-    _, to_grow = torch.topk(sim_mx * torch.gt(sim_mx, args.growing_threshold) * (1 - adj), k=args.added_edges)
-    to_grow = (torch.arange(node_num).repeat_interleave(args.added_edges).to(device), to_grow.view(-1))
+    _, to_grow = torch.topk(sim_mx * torch.gt(sim_mx, args.growing_threshold) * (1 - adj), k=int(args.added_edges * node_num))
+    to_grow = (torch.arange(node_num).repeat_interleave(int(args.added_edges * node_num)).to(device), to_grow.view(-1))
     adj[to_grow] = 1
 
     # TODO: remove rows with all zeros

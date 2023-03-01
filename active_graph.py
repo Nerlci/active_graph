@@ -307,7 +307,7 @@ for num_round in range(args.rand_rounds):
             adj = convert_edge2adj(data.edge_index)
             neighbour = torch.matmul(adj, torch.ones(adj.shape[0]).to(device))
             ctr = torch.matmul(adj, train_mask.to(device).float())
-            rewire_mask = torch.squeeze(torch.nonzero((ctr / neighbour) >= args.mask_threshold))
+            rewire_mask = torch.squeeze(torch.nonzero((ctr / neighbour) >= args.mask_threshold), 1)
             if rewire_mask.shape[0] >= args.rewire_batch_size:
                 data = train_and_rewire(args, data, rewire_mask)
 

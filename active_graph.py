@@ -245,7 +245,7 @@ def active_learn(k, data, old_model, old_optimizer, prev_index, args):
         learner = ActiveFactory(args, old_model, data, prev_index).get_learner()
         train_mask = learner.pretrain_choose(k)
 
-    model = Net(args, data)
+    model = Net(args, org_data)
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -257,16 +257,16 @@ def active_learn(k, data, old_model, old_optimizer, prev_index, args):
     for epoch in tqdm(range(args.epoch)):
         # Optimize GCN
         optimizer.zero_grad()
-        _, out = model(data)
+        _, out = model(org_data)
         # loss = F.nll_loss(out[train_mask], data.y[train_mask])
         loss = loss_func(out[train_mask], data.y[train_mask])
         loss.backward()
         optimizer.step()
         # here we compute multiple measurements
         if args.multilabel:
-            acc = eval_model_f1(model, data, data_y, test_mask)
+            acc = eval_model_f1(model, org_data, data_y, test_mask)
         else:
-            acc = eval_model(model, data, test_mask)
+            acc = eval_model(model, org_data, test_mask)
         if args.verbose:
             print('epoch {} acc: {:.4f} loss: {:.4f}'.format(epoch, acc, loss.item()))
     # compute all metrics in the final round

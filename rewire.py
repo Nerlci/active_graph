@@ -101,7 +101,7 @@ def rewire(args, data, sim_mx):
     to_grow = (torch.arange(node_num).repeat_interleave(int(args.added_edges * node_num)).to(device), to_grow.view(-1))
     adj[to_grow] = 1
 
-    # TODO: remove rows with all zeros
+    # TODO: exclude rows with all zeros
 
     to_prune = torch.nonzero(torch.lt(sim_mx, args.pruning_threshold)).T
     to_prune = (to_prune[0], to_prune[1])

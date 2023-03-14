@@ -6,6 +6,7 @@ import networkx as nx
 from sklearn.metrics.pairwise import euclidean_distances
 
 from sklearn.cluster import KMeans
+# from cuml import KMeans
 from sklearn.metrics import pairwise_distances
 from utils import convert_edge2adj, normalize
 from utils import kcenter_choose, kmeans_choose, kmedoids_choose, combine_new_old
@@ -38,6 +39,8 @@ class ActiveFactory:
             self.learner = AnrmabLearner
         elif self.args.method == 'age':
             self.learner = AgeLearner
+        elif self.args.method == 'grain':
+            raise NotImplementedError
         elif self.args.method == 'combined':
             self.learner = CombinedLearner
         return self.learner(self.args, self.model, self.data, self.prev_index)

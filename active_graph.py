@@ -203,7 +203,7 @@ org_data = data.clone()
 # - 2. fresh start of optimizer and NOT model
 
 # TODO: should consider interactive selection of nodes
-def active_learn(k, data, old_model, old_optimizer, prev_index, args):
+def active_learn(k, data, org_data, old_model, old_optimizer, prev_index, args):
     if args.multilabel:
         loss_func = torch.nn.BCEWithLogitsLoss()
     else:
@@ -314,7 +314,7 @@ for num_round in range(args.rand_rounds):
         # lr should be 0.001??
         # replace old model, optimizer with new model
         # all_metrics is a tuple
-        all_metrics, train_mask, model, optimizer = active_learn(k, data, model, optimizer, train_mask, args)
+        all_metrics, train_mask, model, optimizer = active_learn(k, data, org_data, model, optimizer, train_mask, args)
         single_x_label.append(np.where(train_mask.cpu().numpy())[0].tolist())
         single_y_label.append(data.y[single_x_label[-1]].cpu().numpy().tolist())
 

@@ -18,10 +18,25 @@ def convert_edge2adj(edge_index):
     mat = torch.from_numpy(np.array(mat.todense())).to(device)
     return mat
 
+def convert_edge2adj_sparse(edge_index):
+    # float type
+    mat = tgu.to_scipy_sparse_matrix(edge_index)
+    mat = mat + mat.T.multiply(mat.T > mat) - mat.multiply(mat.T > mat)
+    mat = mat + sp.eye(mat.shape[0])
+    return mat
+
 def normalize(adj):
     inv_sqrt_degree = 1. / torch.sqrt(adj.sum(dim=1, keepdim=False))
     inv_sqrt_degree[inv_sqrt_degree == float("Inf")] = 0
     return inv_sqrt_degree[:, None] * adj * inv_sqrt_degree[None, :]
+
+def normalize_row(mx):
+    rowsum = np.array(mx.sum(1))
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.
+    r_mat_inv = sp.diags(r_inv)
+    mx = r_mat_inv.dot(mx)
+    return mx
 
 def normalize_adj(mx):
     """Row-normalize sparse matrix"""

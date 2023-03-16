@@ -196,7 +196,7 @@ args.num_classes = dataset.num_classes
 
 print(args)
 
-org_data = data.clone()
+org_data = data.clone().detach()
 
 learner = None
 
@@ -290,7 +290,7 @@ start_time = time.time()
 metric_names = METRIC_NAMES
 # different random seeds
 for num_round in range(args.rand_rounds):
-    data = org_data.clone()
+    data = org_data.clone().detach()
     train_mask = None
     # here should be initialized with different seeds
     if not args.uniform_random:

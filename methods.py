@@ -10,7 +10,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 # from cuml import KMeans
 from sklearn.metrics import pairwise_distances
-from utils import convert_edge2adj, normalize, normalize_adj
+from utils import convert_edge2adj, normalize, normalize_adj, convert_edge2adj_sparse, normalize_row
 from utils import kcenter_choose, kmeans_choose, kmedoids_choose, combine_new_old
 
 import time
@@ -425,16 +425,17 @@ class GrainLearner(ActiveLearner):
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        adj = convert_edge2adj(data.edge_index)
+        adj = normalize_adj(convert_edge2adj_sparse(data.edge_index)).todense()
         adj_matrix = torch.FloatTensor(adj).to(self.device)
         adj_matrix2 = torch.mm(adj_matrix, adj_matrix).to(self.device)
-        features = data.x
-        features_aax = np.array(torch.mm(adj_matrix2, features).cpu())
+        features = torch.from_numpy(normalize_row(data.x))
+        features_aax = torch.mm(adj_matrix2, features)
         num_nodes = data.num_nodes
 
-        g = np.dot(features_aax, features_aax.T)
-        h = np.tile(np.diag(g), (features_aax.shape[0], 1))
-        distance_aax = np.sqrt(h + h.T - 2 * g)
+        g = torch.mm(features_aax, features_aax.T)
+        h = torch.diag(g).repeat(features_aax.shape[0], 1)
+        distance_aax = torch.sqrt(h + h.T - 2 * g)
+        distance_aax = (distance_aax - torch.min(distance_aax)) / (torch.max(distance_aax) - torch.min(distance_aax))
 
         self.adj = adj
         self.adj2 = adj_matrix2
@@ -449,14 +450,13 @@ class GrainLearner(ActiveLearner):
         balls = self.distance_aax <= self.radium
 
         available = list(range(num_nodes))
-        dot_results = torch.matmul(torch.from_numpy(balls).to(torch.uint8).to(self.device),
-                                   (self.adj2 != 0).to(torch.uint8))
+        dot_results = torch.matmul((self.adj2 != 0).to(torch.float64),
+                                   balls.to(torch.float64))
         for node in available:
             # neighbors_tmp = torch.unsqueeze((self.adj2 != 0)[node], dim=1)
             # dot_result = np.matmul(balls, neighbors_tmp).T
             # balls_dict[node] = set(np.nonzero(dot_result[0])[0])
-            pos = torch.nonzero(dot_results[node])
-            balls_dict[node] = set(pos[0]) if pos.shape[0] != 0 else set()
+            balls_dict[node] = set(torch.squeeze(torch.nonzero(dot_results[node]), dim=1).numpy())
 
         # choose the node
         ret_tensor = torch.zeros(num_nodes, dtype=torch.bool)

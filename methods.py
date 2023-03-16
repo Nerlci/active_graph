@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -8,7 +10,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 # from cuml import KMeans
 from sklearn.metrics import pairwise_distances
-from utils import convert_edge2adj, normalize
+from utils import convert_edge2adj, normalize, normalize_adj
 from utils import kcenter_choose, kmeans_choose, kmedoids_choose, combine_new_old
 
 import time
@@ -40,7 +42,7 @@ class ActiveFactory:
         elif self.args.method == 'age':
             self.learner = AgeLearner
         elif self.args.method == 'grain':
-            raise NotImplementedError
+            self.learner = GrainLearner
         elif self.args.method == 'combined':
             self.learner = CombinedLearner
         return self.learner(self.args, self.model, self.data, self.prev_index)
@@ -409,4 +411,62 @@ class NonOverlapDegreeLearner(ActiveLearner):
                 break
 
         ret_tensor[torch.LongTensor(index_list)] = 1
+        return ret_tensor
+
+def get_current_neighbors_dense(cur_nodes, adj2):
+    if len(cur_nodes) == 0:
+        return np.ones(adj2.shape[0])
+    neighbors = (adj2[list(cur_nodes)].sum(axis = 0) != 0) + 0
+    return neighbors if len(cur_nodes) != 0 else np.ones(adj2.shape[0])
+
+class GrainLearner(ActiveLearner):
+    def __init__(self, args, model, data, prev_index):
+        super(GrainLearner, self).__init__(args, model, data, prev_index)
+
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        adj = convert_edge2adj(data.edge_index)
+        adj_matrix = torch.FloatTensor(adj).to(self.device)
+        adj_matrix2 = torch.mm(adj_matrix, adj_matrix).to(self.device)
+        features = data.x
+        features_aax = np.array(torch.mm(adj_matrix2, features).cpu())
+        num_nodes = data.num_nodes
+
+        g = np.dot(features_aax, features_aax.T)
+        h = np.tile(np.diag(g), (features_aax.shape[0], 1))
+        distance_aax = np.sqrt(h + h.T - 2 * g)
+
+        self.adj = adj
+        self.adj2 = adj_matrix2
+        self.distance_aax = distance_aax
+        self.radium = args.radium
+
+
+    def pretrain_choose(self, num_points):
+        num_nodes = self.data.num_nodes
+        balls_dict = dict()
+        covered_balls = set()
+        balls = self.distance_aax <= self.radium
+
+        available = list(range(num_nodes))
+        dot_results = torch.matmul(torch.from_numpy(balls).to(torch.uint8).to(self.device),
+                                   (self.adj2 != 0).to(torch.uint8))
+        for node in available:
+            # neighbors_tmp = torch.unsqueeze((self.adj2 != 0)[node], dim=1)
+            # dot_result = np.matmul(balls, neighbors_tmp).T
+            # balls_dict[node] = set(np.nonzero(dot_result[0])[0])
+            pos = torch.nonzero(dot_results[node])
+            balls_dict[node] = set(pos[0]) if pos.shape[0] != 0 else set()
+
+        # choose the node
+        ret_tensor = torch.zeros(num_nodes, dtype=torch.bool)
+        while torch.sum(ret_tensor) < num_points:
+            node_max = max(available, key=lambda n: len(covered_balls | balls_dict[n]), default=None)
+            ret_tensor[node_max] = 1
+            available.remove(node_max)
+            covered_balls = covered_balls.union(balls_dict[node_max])
+            res_ball_num = num_nodes - len(covered_balls)
+            if res_ball_num == 0:
+                break
+
         return ret_tensor

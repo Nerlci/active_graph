@@ -4,6 +4,7 @@ import time
 import torch_geometric.utils as tgu
 from sklearn.metrics import pairwise_distances
 from sklearn.cluster import KMeans
+import scipy.sparse as sp
 
 # Transformation utils
 # construct adj matrix from edge_index
@@ -21,6 +22,14 @@ def normalize(adj):
     inv_sqrt_degree = 1. / torch.sqrt(adj.sum(dim=1, keepdim=False))
     inv_sqrt_degree[inv_sqrt_degree == float("Inf")] = 0
     return inv_sqrt_degree[:, None] * adj * inv_sqrt_degree[None, :]
+
+def normalize_adj(mx):
+    """Row-normalize sparse matrix"""
+    rowsum = np.array(mx.sum(1))
+    r_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    r_inv_sqrt[np.isinf(r_inv_sqrt)] = 0.
+    r_mat_inv_sqrt = sp.diags(r_inv_sqrt)
+    return mx.dot(r_mat_inv_sqrt).transpose().dot(r_mat_inv_sqrt).tocoo()
 
 # Clustering utils
 # Note: code modified from https://github.com/google/active-learning/blob/master/sampling_methods/kcenter_greedy.py

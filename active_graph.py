@@ -1,3 +1,4 @@
+import cProfile
 import random
 
 import numpy as np
@@ -116,6 +117,9 @@ parser.add_argument('--uncertain_score', type=str, default='entropy',
 # clustering method
 parser.add_argument('--cluster_method', type=str, default='kmeans',
                     help='clustering method in kmeans and coreset; choice between [kmeans, kcenter]')
+
+parser.add_argument('--radium', type=float, default=0.05,
+                    help='radium of grain')
 ####
 
 # dataset parsed info; usually not manually specified
@@ -178,7 +182,7 @@ elif args.dataset in ['Cornell', 'Wisconsin', 'Texas']:
     dataset = WebKB(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset))
     data = dataset[0].to(device)
 elif args.dataset in ['Chameleon', 'Squirrel']:
-    dataset = WikipediaNetwork(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset.lower()))
+    dataset = WikipediaNetwork(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset.lower()), geom_gcn_preprocess=True)
     data = dataset[0].to(device)
 elif args.dataset in ['Actor']:
     dataset = Actor(root='./data/{}'.format(args.dataset))
@@ -192,11 +196,9 @@ args.num_classes = dataset.num_classes
 
 print(args)
 
-#rewire
-if args.rewire:
-    data = train_and_rewire(args, data, torch.arange(data.num_nodes))
-
 org_data = data.clone()
+
+learner = None
 
 # 2 types of AL
 # - 1. fresh start of optimizer and model
@@ -295,11 +297,16 @@ for num_round in range(args.rand_rounds):
         torch.manual_seed(num_round+args.seed)  # for GPU and CPU after torch 1.0
         np.random.seed(num_round+args.seed)
         random.seed(num_round + args.seed)
-    model = Net(args, data)
+    model = Net(args, org_data)
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     single_y_label = []
     single_x_label = []
+
+    # initial rewire
+    if args.rewire:
+        data = train_and_rewire(args, data, torch.arange(data.num_nodes))
+
     # for some methods, the current selection is dependent on previous results
     for num, k in enumerate(args.label_list):
         # rewire
@@ -343,21 +350,21 @@ for num, k in enumerate(args.label_list):
     print('#label: {0:d}, {1:s}'.format(k, ' '.join(metric_string_list)))
 
 # dump to file about the specific results, for ease of std computation
-# folder = '{}/{}/{}/'.format(args.model, args.dataset, args.method)
-# if not os.path.exists(folder):
-#     os.makedirs(folder)
-# prefix='knl_{:1d}slc_{:.1f}us_{:s}'.format(args.kmeans_num_layer, args.self_loop_coeff, args.uncertain_score)
-# for i in range(100):
-#     # find the next available filename
-#     filename = folder + prefix + '.{:02d}.json'.format(i)
-#     if not os.path.exists(filename):
-#         # parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist()}
-#         parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist(), 'x_label': x_label, 'y_label': y_label, 'time': time.time()-start_time, 'metric_names': metric_names}
-#         with open(filename, 'w') as f:
-#             f.write(json.dumps(parsed, indent=2))
-#         break
+folder = '{}/{}/{}/'.format(args.model, args.dataset, args.method)
+if not os.path.exists(folder):
+    os.makedirs(folder)
+prefix='knl_{:1d}slc_{:.1f}us_{:s}'.format(args.kmeans_num_layer, args.self_loop_coeff, args.uncertain_score)
+for i in range(100):
+    # find the next available filename
+    filename = folder + prefix + '.{:02d}.json'.format(i)
+    if not os.path.exists(filename):
+        # parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist()}
+        parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist(), 'x_label': x_label, 'y_label': y_label, 'time': time.time()-start_time, 'metric_names': metric_names}
+        with open(filename, 'w') as f:
+            f.write(json.dumps(parsed, indent=2))
+        break
 
-filename = 'optim.json'
-parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist(), 'x_label': x_label, 'y_label': y_label, 'time': time.time()-start_time, 'metric_names': metric_names}
-with open(filename, 'w') as f:
-    f.write(json.dumps(parsed, indent=2))
+# filename = 'optim.json'
+# parsed = {'args': vars(args), 'avg': avg_res, 'std': std_res, 'res': res.tolist(), 'x_label': x_label, 'y_label': y_label, 'time': time.time()-start_time, 'metric_names': metric_names}
+# with open(filename, 'w') as f:
+#     f.write(json.dumps(parsed, indent=2))

@@ -181,12 +181,15 @@ elif args.dataset in ['CoraFull']:
 elif args.dataset in ['Cornell', 'Wisconsin', 'Texas']:
     dataset = WebKB(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset))
     data = dataset[0].to(device)
+    data.train_mask, data.val_mask, data.test_mask = (data.train_mask[:, 0], data.val_mask[:, 0], data.test_mask[:, 0])
 elif args.dataset in ['Chameleon', 'Squirrel']:
     dataset = WikipediaNetwork(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset.lower()), geom_gcn_preprocess=True)
     data = dataset[0].to(device)
+    data.train_mask, data.val_mask, data.test_mask = (data.train_mask[:, 0], data.val_mask[:, 0], data.test_mask[:, 0])
 elif args.dataset in ['Actor']:
     dataset = Actor(root='./data/{}'.format(args.dataset))
     data = dataset[0].to(device)
+    data.train_mask, data.val_mask, data.test_mask = (data.train_mask[:, 0], data.val_mask[:, 0], data.test_mask[:, 0])
 else:
     raise NotImplementedError
 Net = get_model(args.model)
@@ -210,7 +213,8 @@ def active_learn(k, data, org_data, old_model, old_optimizer, prev_index, args):
         loss_func = torch.nn.BCEWithLogitsLoss()
     else:
         loss_func = F.nll_loss
-    test_mask = torch.ones(data.y.shape[0], dtype=torch.bool)
+    test_mask = data.test_mask
+    val_mask = data.val_mask
     data_y = data.y > 0.99 # cast to uint8 for downstream-fast computation
     # test_mask = torch.ones_like(data.test_mask)
     # for multi-class
@@ -244,7 +248,7 @@ def active_learn(k, data, org_data, old_model, old_optimizer, prev_index, args):
                 train_mask_list = torch.LongTensor(learner.query(data, prev_index_list, k-len(prev_index_list)))
             train_mask[train_mask_list] = 1
     else:
-        learner = ActiveFactory(args, old_model, data, prev_index).get_learner()
+        learner = ActiveFactory(args, old_model, data, prev_index, data.train_mask).get_learner()
         train_mask = learner.pretrain_choose(k)
 
     model = Net(args, org_data)
@@ -255,24 +259,25 @@ def active_learn(k, data, org_data, old_model, old_optimizer, prev_index, args):
 
     if args.verbose:
         print('selected labels:', data.y[train_mask])
+        print('selected nodes:', torch.squeeze(torch.nonzero(train_mask), dim=1))
     # fresh new training
     for epoch in tqdm(range(args.epoch)):
         # Optimize GCN
         optimizer.zero_grad()
         _, out = model(org_data)
         # loss = F.nll_loss(out[train_mask], data.y[train_mask])
-        loss = loss_func(out[train_mask], data.y[train_mask])
+        loss = loss_func(out[train_mask], org_data.y[train_mask])
         loss.backward()
         optimizer.step()
         # here we compute multiple measurements
         if args.multilabel:
-            acc = eval_model_f1(model, org_data, data_y, test_mask)
+            acc = eval_model_f1(model, org_data, data_y, val_mask)
         else:
-            acc = eval_model(model, org_data, test_mask)
+            acc = eval_model(model, org_data, val_mask)
         if args.verbose:
-            print('epoch {} acc: {:.4f} loss: {:.4f}'.format(epoch, acc, loss.item()))
+            print('epoch {} val_acc: {:.4f} loss: {:.4f}'.format(epoch, acc, loss.item()))
     # compute all metrics in the final round
-    all_metrics = final_eval(model, data, test_mask, num_class) # acc, macro_f1
+    all_metrics = final_eval(model, org_data, test_mask, num_class) # acc, macro_f1
     return all_metrics, train_mask, model, optimizer
     # return acc, train_mask, model, optimizer
 

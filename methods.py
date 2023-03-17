@@ -17,12 +17,13 @@ import time
 
 # Factory class:
 class ActiveFactory:
-    def __init__(self, args, model, data, prev_index):
+    def __init__(self, args, model, data, prev_index, train_mask):
         #
         self.args = args
         self.model = model
         self.data = data
         self.prev_index = prev_index
+        self.train_mask = train_mask
 
     def get_learner(self):
         if self.args.method == 'random':
@@ -45,16 +46,17 @@ class ActiveFactory:
             self.learner = GrainLearner
         elif self.args.method == 'combined':
             self.learner = CombinedLearner
-        return self.learner(self.args, self.model, self.data, self.prev_index)
+        return self.learner(self.args, self.model, self.data, self.prev_index, self.train_mask)
 
 # Base class
 class ActiveLearner:
-    def __init__(self, args, model, data, prev_index):
+    def __init__(self, args, model, data, prev_index, train_mask):
         self.model = model
         self.data = data
         self.n = data.num_nodes
         self.args = args
         self.prev_index = prev_index
+        self.train_mask = train_mask
 
         if prev_index is None:
             self.prev_index_list = []
@@ -69,8 +71,8 @@ class ActiveLearner:
         raise NotImplementedError
 
 class CombinedLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
-        super(CombinedLearner, self).__init__(args, model, data, prev_index)
+    def __init__(self, args, model, data, prev_index, train_mask):
+        super(CombinedLearner, self).__init__(args, model, data, prev_index, train_mask)
 
     def pretrain_choose(self, num_points):
         # first choose half nodes from uncertain
@@ -118,9 +120,9 @@ def perc_full_np(input):
     return loc / l
 
 class AgeLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
+    def __init__(self, args, model, data, prev_index, train_mask):
         # start_time = time.time()
-        super(AgeLearner, self).__init__(args, model, data, prev_index)
+        super(AgeLearner, self).__init__(args, model, data, prev_index, train_mask)
         self.device = data.x.get_device()
 
         self.G = tgu.to_networkx(data)
@@ -168,15 +170,15 @@ class AgeLearner(ActiveLearner):
         # edprec = np.asarray([percd(ed_score,i) for i in range(len(ed_score))])
         edprec = 1. - perc_full_np(ed_score)
         finalweight = alpha*entrperc + beta*edprec + gamma*self.cenperc
-        full_new_index_list = np.argsort(finalweight)[::-1][:num_points]
+        full_new_index_list = np.argsort(finalweight * self.train_mask.numpy())[::-1][:num_points]
         # print('Age pretrain_choose time', time.time() - start_time)
 
         return combine_new_old(full_new_index_list, self.prev_index_list, num_points, self.n, in_order=True)
 
 class AnrmabLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
+    def __init__(self, args, model, data, prev_index, train_mask):
         # start_time = time.time()
-        super(AnrmabLearner, self).__init__(args, model, data, prev_index)
+        super(AnrmabLearner, self).__init__(args, model, data, prev_index, train_mask)
         self.device = data.x.get_device()
 
         self.y = data.y.detach().cpu().numpy()
@@ -226,9 +228,9 @@ class AnrmabLearner(ActiveLearner):
         # sample new points according to phi
         # TODO: change to the sampling method
         if self.args.anrmab_argmax:
-            full_new_index_list = np.argsort(phi)[::-1][:num_points] # argmax
+            full_new_index_list = np.argsort(phi * self.train_mask.numpy())[::-1][:num_points] # argmax
         else:
-            full_new_index_list = np.random.choice(len(phi), num_points, p=phi)
+            full_new_index_list = np.random.choice(len(phi), num_points, p=(phi * self.train_mask.numpy())/np.sum(phi * self.train_mask.numpy()))
 
         mask = combine_new_old(full_new_index_list, self.prev_index_list, num_points, self.n, in_order=True)
         mask_list = np.where(mask)[0]
@@ -250,8 +252,8 @@ class AnrmabLearner(ActiveLearner):
 
 
 class UncertaintyLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
-        super(UncertaintyLearner, self).__init__(args, model, data, prev_index)
+    def __init__(self, args, model, data, prev_index, train_mask):
+        super(UncertaintyLearner, self).__init__(args, model, data, prev_index, train_mask)
         self.device = data.x.get_device()
 
     def pretrain_choose(self, num_points):
@@ -298,7 +300,7 @@ class CoresetLearner(ActiveLearner):
     def pretrain_choose(self, num_points):
         # random selection if the model is untrained
         if self.prev_index is None:
-            indices = torch.multinomial(torch.range(start=1, end=self.n-1), num_samples=num_points, replacement=False)
+            indices = torch.multinomial(torch.masked_select(torch.ones(self.n), self.train_mask), num_samples=num_points, replacement=False)
             ret_tensor = torch.zeros((self.n), dtype=torch.bool)
             ret_tensor[indices] = 1
             return ret_tensor
@@ -327,8 +329,8 @@ class CoresetLearner(ActiveLearner):
             raise NotImplementedError
 
 class KmeansLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
-        super(KmeansLearner, self).__init__(args, model, data, prev_index)
+    def __init__(self, args, model, data, prev_index, train_mask):
+        super(KmeansLearner, self).__init__(args, model, data, prev_index, train_mask)
         start = time.time()
         self.adj_full = convert_edge2adj(data.edge_index)
         print('Time cost: {}'.format(time.time() - start))
@@ -360,32 +362,32 @@ class KmeansLearner(ActiveLearner):
         '''
 
 class RandomLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
-        super(RandomLearner, self).__init__(args, model, data, prev_index)
+    def __init__(self, args, model, data, prev_index, train_mask):
+        super(RandomLearner, self).__init__(args, model, data, prev_index, train_mask)
     def pretrain_choose(self, num_points):
-        indices = torch.multinomial(torch.range(start=1, end=self.n-1), num_samples=num_points, replacement=False)
+        indices = torch.multinomial(torch.masked_select(torch.ones(self.n), self.train_mask), num_samples=num_points, replacement=False)
         ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         ret_tensor[indices] = 1
         return ret_tensor
 
 class DegreeLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
-        super(DegreeLearner, self).__init__(args, model, data, prev_index)
+    def __init__(self, args, model, data, prev_index, train_mask):
+        super(DegreeLearner, self).__init__(args, model, data, prev_index, train_mask)
         start = time.time()
         self.adj_full = convert_edge2adj(data.edge_index)
         print('Time cost: {}'.format(time.time() - start))
     def pretrain_choose(self, num_points):
         ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         degree_full = self.adj_full.sum(dim=1)
-        vals, indices = torch.topk(degree_full, k=num_points)
+        vals, indices = torch.topk(degree_full * self.train_mask, k=num_points)
         ret_tensor[indices] = 1
         return ret_tensor
 
 # impose all category constraint
 # no direct linkage
 class NonOverlapDegreeLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
-        super(NonOverlapDegreeLearner, self).__init__(args, model, data, prev_index)
+    def __init__(self, args, model, data, prev_index, train_mask):
+        super(NonOverlapDegreeLearner, self).__init__(args, model, data, prev_index, train_mask)
         start = time.time()
         self.adj_full = convert_edge2adj(data.edge_index)
         print('Time cost: {}'.format(time.time() - start))
@@ -420,8 +422,8 @@ def get_current_neighbors_dense(cur_nodes, adj2):
     return neighbors if len(cur_nodes) != 0 else np.ones(adj2.shape[0])
 
 class GrainLearner(ActiveLearner):
-    def __init__(self, args, model, data, prev_index):
-        super(GrainLearner, self).__init__(args, model, data, prev_index)
+    def __init__(self, args, model, data, prev_index, train_mask):
+        super(GrainLearner, self).__init__(args, model, data, prev_index, train_mask)
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -449,7 +451,7 @@ class GrainLearner(ActiveLearner):
         covered_balls = set()
         balls = self.distance_aax <= self.radium
 
-        available = list(range(num_nodes))
+        available = list(torch.squeeze(torch.nonzero(self.train_mask), dim=1).numpy())
         dot_results = torch.matmul((self.adj2 != 0).to(torch.float64),
                                    balls.to(torch.float64))
         for node in available:

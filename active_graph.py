@@ -181,15 +181,12 @@ elif args.dataset in ['CoraFull']:
 elif args.dataset in ['Cornell', 'Wisconsin', 'Texas']:
     dataset = WebKB(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset))
     data = dataset[0].to(device)
-    data.train_mask, data.val_mask, data.test_mask = (data.train_mask[:, 0], data.val_mask[:, 0], data.test_mask[:, 0])
 elif args.dataset in ['Chameleon', 'Squirrel']:
     dataset = WikipediaNetwork(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset.lower()), geom_gcn_preprocess=True)
     data = dataset[0].to(device)
-    data.train_mask, data.val_mask, data.test_mask = (data.train_mask[:, 0], data.val_mask[:, 0], data.test_mask[:, 0])
 elif args.dataset in ['Actor']:
     dataset = Actor(root='./data/{}'.format(args.dataset))
     data = dataset[0].to(device)
-    data.train_mask, data.val_mask, data.test_mask = (data.train_mask[:, 0], data.val_mask[:, 0], data.test_mask[:, 0])
 else:
     raise NotImplementedError
 Net = get_model(args.model)
@@ -291,12 +288,13 @@ print('Using', device, 'for neural network training')
 y_label = []
 x_label = []
 start_time = time.time()
+split_count = 10 if args.dataset in ['Cornell', 'Wisconsin', 'Texas', 'Chameleon', 'Squirrel', 'Actor'] else 1
 
 metric_names = METRIC_NAMES
 # different random seeds
 for num_round in range(args.rand_rounds):
     data = org_data.clone().detach()
-    train_mask = None
+    train_mask = [None] * split_count
     # here should be initialized with different seeds
     if not args.uniform_random:
         torch.manual_seed(num_round+args.seed)  # for GPU and CPU after torch 1.0
@@ -315,10 +313,10 @@ for num_round in range(args.rand_rounds):
     # for some methods, the current selection is dependent on previous results
     for num, k in enumerate(args.label_list):
         # rewire
-        if args.rewire and train_mask is not None:
+        if args.rewire and train_mask[0] is not None:
             adj = convert_edge2adj(data.edge_index)
             neighbour = torch.matmul(adj, torch.ones(adj.shape[0]).to(device))
-            ctr = torch.matmul(adj, train_mask.to(device).float())
+            ctr = torch.matmul(adj, train_mask[0].to(device).float())
             rewire_mask = torch.squeeze(torch.nonzero((ctr / neighbour) >= args.mask_threshold), 1)
             if rewire_mask.shape[0] >= args.rewire_batch_size:
                 data = train_and_rewire(args, data, rewire_mask)
@@ -326,10 +324,15 @@ for num_round in range(args.rand_rounds):
         # lr should be 0.001??
         # replace old model, optimizer with new model
         # all_metrics is a tuple
-        all_metrics, train_mask, model, optimizer = active_learn(k, data, org_data, model, optimizer, train_mask, args)
-        single_x_label.append(np.where(train_mask.cpu().numpy())[0].tolist())
-        single_y_label.append(data.y[single_x_label[-1]].cpu().numpy().tolist())
+        all_metrics_sum = np.array([0., 0.])
+        for i in range(split_count):
+            data.train_mask, data.val_mask, data.test_mask = (org_data.train_mask[:, i], org_data.val_mask[:, i], org_data.test_mask[:, i])
+            all_metrics, train_mask[i], model, optimizer = active_learn(k, data, org_data, model, optimizer, train_mask[i], args)
+            single_x_label.append(np.where(train_mask[i].cpu().numpy())[0].tolist())
+            single_y_label.append(data.y[single_x_label[-1]].cpu().numpy().tolist())
+            all_metrics_sum += all_metrics
 
+        all_metrics = tuple(all_metrics_sum / split_count)
         res[num_round][num] = all_metrics
         metric_format = ' '.join(['%s {:.4f}' % name for name in metric_names])
         metric_string = metric_format.format(*res[num_round][num]) # TODO: should be a flexible format

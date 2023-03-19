@@ -230,7 +230,7 @@ class AnrmabLearner(ActiveLearner):
         if self.args.anrmab_argmax:
             full_new_index_list = np.argsort(phi * self.train_mask.numpy())[::-1][:num_points] # argmax
         else:
-            full_new_index_list = np.random.choice(len(phi), num_points, p=(phi * self.train_mask.numpy())/np.sum(phi * self.train_mask.numpy()))
+            full_new_index_list = np.random.choice(len(phi), num_points, p=(phi * self.train_mask.numpy())/np.sum(phi * self.train_mask.numpy()), replace=False)
 
         mask = combine_new_old(full_new_index_list, self.prev_index_list, num_points, self.n, in_order=True)
         mask_list = np.where(mask)[0]
@@ -365,7 +365,7 @@ class RandomLearner(ActiveLearner):
     def __init__(self, args, model, data, prev_index, train_mask):
         super(RandomLearner, self).__init__(args, model, data, prev_index, train_mask)
     def pretrain_choose(self, num_points):
-        indices = torch.multinomial(torch.masked_select(torch.ones(self.n), self.train_mask), num_samples=num_points, replacement=False)
+        indices = torch.multinomial(self.train_mask.to(torch.float64), num_samples=num_points, replacement=False)
         ret_tensor = torch.zeros((self.n), dtype=torch.bool)
         ret_tensor[indices] = 1
         return ret_tensor
@@ -430,7 +430,7 @@ class GrainLearner(ActiveLearner):
         adj = normalize_adj(convert_edge2adj_sparse(data.edge_index)).todense()
         adj_matrix = torch.FloatTensor(adj).to(self.device)
         adj_matrix2 = torch.mm(adj_matrix, adj_matrix).to(self.device)
-        features = torch.from_numpy(normalize_row(data.x))
+        features = torch.from_numpy(normalize_row(data.x.cpu())).to(self.device)
         features_aax = torch.mm(adj_matrix2, features)
         num_nodes = data.num_nodes
 
@@ -451,14 +451,14 @@ class GrainLearner(ActiveLearner):
         covered_balls = set()
         balls = self.distance_aax <= self.radium
 
-        available = list(torch.squeeze(torch.nonzero(self.train_mask), dim=1).numpy())
+        available = list(torch.squeeze(torch.nonzero(self.train_mask), dim=1).cpu().numpy())
         dot_results = torch.matmul((self.adj2 != 0).to(torch.float64),
                                    balls.to(torch.float64))
         for node in available:
             # neighbors_tmp = torch.unsqueeze((self.adj2 != 0)[node], dim=1)
             # dot_result = np.matmul(balls, neighbors_tmp).T
             # balls_dict[node] = set(np.nonzero(dot_result[0])[0])
-            balls_dict[node] = set(torch.squeeze(torch.nonzero(dot_results[node]), dim=1).numpy())
+            balls_dict[node] = set(torch.squeeze(torch.nonzero(dot_results[node]), dim=1).cpu().numpy())
 
         # choose the node
         ret_tensor = torch.zeros(num_nodes, dtype=torch.bool)

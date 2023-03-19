@@ -170,7 +170,7 @@ if args.dataset[:3] == 'PPI':
     dataset_num = int(args.dataset[3:])
     data = dataset[dataset_num].to(device)
 elif args.dataset in ['Cora', 'Citeseer', 'PubMed']:
-    dataset = Planetoid(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset))
+    dataset = Planetoid(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset), split='full')
     data = dataset[0].to(device)
 elif args.dataset in ['Computers', 'Photo']:
     dataset = Amazon(root='./data/{}'.format(args.dataset), name='{}'.format(args.dataset))
@@ -326,7 +326,8 @@ for num_round in range(args.rand_rounds):
         # all_metrics is a tuple
         all_metrics_sum = np.array([0., 0.])
         for i in range(split_count):
-            data.train_mask, data.val_mask, data.test_mask = (org_data.train_mask[:, i], org_data.val_mask[:, i], org_data.test_mask[:, i])
+            if split_count != 1 :
+                data.train_mask, data.val_mask, data.test_mask = (org_data.train_mask[:, i], org_data.val_mask[:, i], org_data.test_mask[:, i])
             all_metrics, train_mask[i], model, optimizer = active_learn(k, data, org_data, model, optimizer, train_mask[i], args)
             single_x_label.append(np.where(train_mask[i].cpu().numpy())[0].tolist())
             single_y_label.append(data.y[single_x_label[-1]].cpu().numpy().tolist())
